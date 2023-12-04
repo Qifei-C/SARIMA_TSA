@@ -1,0 +1,587 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+```{r}
+root_dir <- rprojroot::find_rstudio_root_file()
+setwd(root_dir)
+source("./scripts/rawdata2.R")
+source("./scripts/plot.roots.R")
+```
+
+```{r}
+# install.packages(c("xts","zoo","forecast","qpcR","astsa","TSA"))
+library(xts)
+library(zoo)
+data$Date <- as.Date(data$Date, format="%d/%m/%Y")
+data <- na.omit(data)
+data$Global_active_power <- as.numeric(data$Global_active_power)
+
+# Get weekly consumption
+# "%Y-%U" gives the year and week number
+weekly_data <- aggregate(Global_active_power ~ format(Date, "%Y-%W"), data, sum)
+colnames(weekly_data) <- c("YearWeek", "Global_active_power")
+
+# Convert the YearWeek to a Date object representing the first day of each week
+weekly_data$Week_Start <- as.Date(paste(weekly_data$YearWeek, 1), format="%Y-%U %u")
+
+# Setting up timeseries with frequency = 12
+power_ts <- ts(weekly_data$Global_active_power, start=c(2006, which(weekdays(as.Date("2006-01-01")) == "Sunday")), frequency=52)
+ts.plot(power_ts, gpars=list(xlab="Year", ylab="Consumption"))
+```
+
+
+```{r}
+fit <- lm(power_ts ~ time(power_ts))
+ts.plot(power_ts,gpars=list(xlab="Year",ylab="Consumption"))
+abline(h=mean(power_ts), col="red")
+abline(fit, col="blue", lwd=2)
+```
+
+```{r}
+# Assuming power_ts is your original time series object
+mean_power_ts <- mean(power_ts)
+
+# Subtract the mean from the time series to center it
+power_ts <- power_ts - mean_power_ts
+
+# Now you can proceed with your time series analysis on the centered data
+# For example, plotting the centered time series
+plot(power_ts, main="Mean-Centered Time Series", xlab="Time", ylab="Centered Consumption")
+```
+
+```{r}
+# Find the index that corresponds to mid-2009
+cut_off <- which(time(power_ts) >= as.yearmon("2009-06"))
+
+# Split the data into training and test sets
+train_set <- window(power_ts, end=c(2009, (which.max(time(power_ts) < as.yearmon("2009-07")))/frequency(power_ts)))
+test_set <- window(power_ts, start=c(2009, (which.min(time(power_ts) >= as.yearmon("2009-07")))/frequency(power_ts)))
+plot(train_set, main="Train Time Series", xlab="Time", ylab="Centered Consumption")
+plot(test_set, main="Test Time Series", xlab="Time", ylab="Centered Consumption")
+```
+```{r}
+shapiro.test(train_set)
+```
+
+
+```{r}
+plot(decompose(train_set)$seasonal)
+```
+
+```{r}
+train_set_diff <- diff(train_set, 1)
+acf(train_set, lag.max = 52, main = 'ACF of trended Data') # ACF
+pacf(train_set, lag.max = 52, main = 'PACF of trended Data') # PACF
+acf(train_set_diff, lag.max = 52*3, main = 'ACF of De-trended Data') # ACF
+pacf(train_set_diff, lag.max = 52*3, main = 'PACF of De-trended Data') # PACF
+```
+
+```{r}
+library(tseries)
+
+max_diff <- 10  # Set a maximum number of differences
+variances <- numeric(max_diff)
+p_values <- numeric(max_diff)
+
+for (i in 1:max_diff) {
+  if (i == 1) {
+    differenced_ts <- diff(train_set, differences = 1)
+  } else {
+    differenced_ts <- diff(differenced_ts, differences = 1)
+  }
+  
+  variances[i] <- var(differenced_ts)
+  adf_test <- adf.test(differenced_ts, alternative = "stationary")
+  p_values[i] <- adf_test$p.value
+  
+  # Print the variance and the ADF test p-value
+  cat("Differencing level", i, ": Variance =", variances[i], ", p-value =", p_values[i], "\n")
+  
+  # Optional: Stop if p-value is below a certain threshold, e.g., 0.05
+  if (p_values[i] < 0.05) {
+    cat("Stationarity achieved at differencing level", i, "\n")
+    break
+  }
+}
+
+# Plotting the variance
+plot(variances, type = "b", xlab = "Differencing Level", ylab = "Variance",
+     main = "Variance of the Time Series at Each Level of Differencing")
+```
+
+
+```{r}
+var(train_set) # Variance before Diff
+dt.train_set <- diff(train_set, 1)
+(var(dt.train_set)) # Variance after diff once at lag 1
+dt2.train_set <- diff(dt.train_set, 52)
+(var(dt2.train_set)) # Variance after diff twice at lag 52 seasonal trend
+plot(dt2.train_set) # Plot of the de-trended data
+```
+
+
+```{r}
+train_set_diff <- diff(train_set, 1)
+acf(train_set_diff, lag.max = 52, main = 'ACF of De-trended Data') # ACF
+pacf(train_set_diff, lag.max = 52, main = 'PACF of De-trended Data') # PACF
+acf(train_set_diff, lag.max = 52*3, main = 'ACF of De-trended Data') # ACF
+pacf(train_set_diff, lag.max = 52*3, main = 'PACF of De-trended Data') # PACF
+```
+
+```{r}
+# Compute ACF and PACF
+acf_values <- acf(train_set_diff, lag.max = 52*3, plot = FALSE)
+pacf_values <- pacf(train_set_diff, lag.max = 52*3, plot = FALSE)
+
+# Determine the significance level (95% confidence)
+n <- length(train_set_diff)
+conf_level <- qnorm((1 + 0.95)/2) / sqrt(n)
+
+# Find significant lags for ACF
+significant_acf_lags <- which(abs(acf_values$acf) > conf_level)
+
+# Find significant lags for PACF
+significant_pacf_lags <- which(abs(pacf_values$acf) > conf_level)
+
+# Output the lags
+cat("Significant ACF lags at 95% confidence: ", significant_acf_lags, "\n")
+cat("Significant PACF lags at 95% confidence: ", significant_pacf_lags, "\n")
+
+```
+
+When determining the period for a seasonal model from ACF and PACF plots, you should consider the domain knowledge about the data as well as the repeating patterns in the lags. The significant lags you've provided suggest there is a significant autocorrelation at lags 1, 2, 10, 45, 54, 55.
+
+The lag values of 54 and 55 suggest a possible yearly seasonality (assuming the data is weekly, as 52 weeks is approximately one year). Since the significant lag at 54 is close to 52 and appears to be a prominent seasonal peak, it could be the actual seasonal period, especially if it matches with domain knowledge or expected seasonal patterns in the data.
+
+Here’s why you might choose 52 over 54:
+
+    52 weeks in a year: There are 52 full weeks in a year, which is a common period for weekly data when considering annual seasonality.
+    Data alignment: The data may not align perfectly with calendar years, and some years may include an extra day or two due to leap years. This can slightly shift the seasonal peaks in the ACF.
+    Natural Periodicity: Many natural, economic, and social cycles follow an annual pattern, reinforcing the choice of 52 weeks.
+
+In practice, you would typically choose 52 as the period for weekly data unless there is a compelling reason based on the data or domain knowledge to choose a slightly different period like 54. Before finalizing the period, it’s recommended to plot the data and look for seasonal patterns that align with these lags, and to validate the seasonality with domain expertise. Additionally, you can experiment with models using both periods and compare their performance using criteria such as the AIC or BIC, and the residuals of the fitted models.
+
+p: 0,1,2,10,45
+q: 0,1,2,5,15,43
+d: 1
+P: 0
+Q: 0,1
+D: 0
+s:52
+
+
+```{r}
+library(forecast)
+library(qpcR)
+
+# Initialize an empty list to store AICc values and model specifications
+aiccs <- list()
+model_saver <- list()
+
+# Loop over the candidate variables for p, q, and Q
+for(p in c(0,1,2,10,45)) {
+  for(q in c(0,1,2,5,15,43)) {
+    for(Q in c(0, 1)) {
+      # Fit the arima model with the given parameters
+      model <- Arima(train_set, order=c(p, 1, q), seasonal=c(0, 0, Q), method="ML")
+      model_saver[[paste("p=", p, "q=", q, "Q=", Q, sep="")]] <- model
+      # Calculate the AICc and store in the list with the corresponding model specifications
+      aiccs[[paste("p=", p, "q=", q, "Q=", Q, sep="")]] <- AICc(model)
+    }
+  }
+}
+
+# Display the AICc values and corresponding model specifications
+aiccs
+```
+
+```{r}
+# Initialize an empty list to store AICc values and model specifications
+# Loop over the candidate variables for p, q, and Q
+for(p in c(45)) {
+  for(q in c(0,1,2,5,15,43)) {
+    for(Q in c(0, 1)) {
+      # Fit the arima model with the given parameters
+      model <- Arima(train_set, order=c(p, 1, q), seasonal=c(0, 0, Q), method="ML")
+      model_saver[[paste("p=", p, "q=", q, "Q=", Q, sep="")]] <- model
+      # Calculate the AICc and store in the list with the corresponding model specifications
+      aiccs[[paste("p=", p, "q=", q, "Q=", Q, sep="")]] <- AICc(model)
+    }
+  }
+}
+```
+
+```{r}
+library(forecast)
+library(qpcR)
+
+# Initialize an empty list to store AICc values and model specifications
+aiccs3 <- list()
+
+# Loop over the candidate variables for p, q, and Q
+for(p in c(43)) {
+  for(q in c(0, 1, 2, 10)) {
+    for(Q in c(0, 1, 2)) {
+      # Fit the arima model with the given parameters
+      model <- Arima(train_set_diff, order=c(p, 1, q), seasonal=c(0, 0, Q), method="ML")
+      
+      # Calculate the AICc and store in the list with the corresponding model specifications
+      aiccs3[[paste("p=", p, "q=", q, "Q=", Q, sep="")]] <- AICc(model)
+    }
+  }
+}
+
+# Display the AICc values and corresponding model specifications
+aiccs3
+```
+
+```{r}
+# Assuming aiccs, aiccs1, and aiccs2 are your lists of AICc values
+
+# Merge the lists
+all_aiccs <- c(aiccs)
+
+print(all_aiccs)
+```
+
+```{r}
+# Convert the list to a named vector
+aiccs_vector <- unlist(all_aiccs)
+
+# Sort the vector in ascending order of AICc values
+sorted_aiccs <- sort(aiccs_vector)
+
+# Get the names of the top five models
+top_ten_names <- names(head(sorted_aiccs, 10))
+
+# Get the AICc values of the top five models
+top_ten_values <- head(sorted_aiccs, 10)
+
+# Print the top five models with their AICc values
+for (i in 1:10) {
+    cat("Model:", top_ten_names[i], "with an AICc of", top_ten_values[i], "\n")
+}
+```
+
+```{r}
+Arima(train_set_diff, order=c(9, 1, 10), seasonal=c(0, 0, 1), method="ML")
+```
+
+
+
+```{r}
+# Loop through each model in the list and print its summary
+for (model_name in top_ten_names) {
+  cat("\nSummary for model:", model_name, "\n")
+  print(summary(model_saver[[model_name]]))
+}
+```
+
+```{r}
+refine_models <- list()
+library(astsa)
+
+# Model 1: ARIMA(2,1,5)(0,0,1)[52]
+refine_models[['p=2q=5Q=1']] <- arima(train_set, order=c(2, 1, 5), seasonal=c(0, 0, 1), fixed= c(NA,	NA,	NA,	0,	NA,	0,	NA,	NA), method="ML")
+
+# Model 2: ARIMA(2,1,5)
+refine_models[['p=2q=5Q=0']] <- arima(train_set, order=c(2, 1, 5), seasonal=c(0, 0, 0),fixed=c(NA,	NA,	NA,	0,	NA,	0,	NA), method="ML")
+
+# Model 3: ARIMA(1,1,1)(0,0,1)[52]
+refine_models[['p=1q=1Q=1']] <- arima(train_set, order=c(1, 1, 1), seasonal=c(0, 0, 1),fixed=c(NA,	NA,	NA), method="ML")
+
+# Model 4: ARIMA(1,1,15)(0,0,1)[52]
+refine_models[['p=1q=15Q=1']] <- arima(train_set, order=c(1, 1, 15), seasonal=c(0, 0, 1),fixed=c(NA,	NA,	NA,	NA,	0,	0,	0,	0,	NA,	NA,	0,	0,	0,	0,	0,	NA,	NA), method="ML")
+
+# Model 5: ARIMA(0,1,2)(0,0,1)[52]
+refine_models[['p=0q=2Q=1']] <- arima(train_set, order=c(0, 1, 2), seasonal=c(0, 0, 1),fixed=c(NA,	NA,	NA), method="ML")
+
+# Model 6: ARIMA(1,1,1)
+refine_models[['p=1q=1Q=0']] <- arima(train_set, order=c(1, 1, 1), seasonal=c(0, 0, 0),fixed=c(NA,	NA), method="ML")
+
+# Model 7: ARIMA(0,1,2)
+refine_models[['p=0q=2Q=0']] <- arima(train_set, order=c(0, 1, 2), seasonal=c(0, 0, 0),fixed=c(NA,	NA), method="ML")
+
+# Model 8: ARIMA(0,1,15)(0,0,1)[52]
+refine_models[['p=0q=15Q=1']] <- arima(train_set, order=c(0, 1, 15), seasonal=c(0, 0, 1),fixed=c(NA,	NA,	0,	0,	NA,	NA,	NA,	0,	NA,	NA,	0,	0,	0,	0,	0,	NA), method="ML")
+
+# Model 9: ARIMA(0,1,1)(0,0,1)[52]
+refine_models[['p=0q=1Q=1']] <- arima(train_set, order=c(0, 1, 1), seasonal=c(0, 0, 1),fixed=c(NA,	NA), method="ML")
+
+# Model 10: ARIMA(1,1,15)
+refine_models[['p=1q=15Q=0']] <- arima(train_set, order=c(1, 1, 15), seasonal=c(0, 0, 0),fixed=c(NA,	NA,	NA,	NA,	0,	0,	0,	0,	NA,	NA,	0,	NA,	0,	0,	0,	NA), method="ML")
+```
+
+```{r}
+# Loop through each model in the list and print its summary
+for (model_name in top_ten_names) {
+  cat("\nSummary for model:", model_name, "\n")
+  print(summary(refine_models[[model_name]]))
+}
+```
+
+```{r}
+refine_models95 <- list()
+library(astsa)
+
+# Model 1: ARIMA(2,1,5)(0,0,1)[52]
+refine_models95[['p=2q=5Q=1']] <- arima(train_set, order=c(2, 1, 5), seasonal=c(0, 0, 1), fixed= c(NA,	NA,	NA,	0,	NA,	0,	0,	0), method="ML")
+
+# Model 2: ARIMA(2,1,5)
+refine_models95[['p=2q=5Q=0']] <- arima(train_set, order=c(2, 1, 5), seasonal=c(0, 0, 0),fixed=c(NA,	NA,	NA,	0,	NA,	0,	0), method="ML")
+
+# Model 3: ARIMA(1,1,1)(0,0,1)[52]
+refine_models95[['p=1q=1Q=1']] <- arima(train_set, order=c(1, 1, 1), seasonal=c(0, 0, 1),fixed=c(0,	NA,	0), method="ML")
+
+# Model 4: ARIMA(1,1,15)(0,0,1)[52]
+refine_models95[['p=1q=15Q=1']] <- arima(train_set, order=c(1, 1, 15), seasonal=c(0, 0, 1),fixed=c(NA,	NA,	NA,	NA,	0,	0,	0,	0,	NA,	NA,	0,	0,	0,	0,	0,	0,	0), method="ML")
+
+# Model 5: ARIMA(0,1,2)(0,0,1)[52]
+refine_models95[['p=0q=2Q=1']] <- arima(train_set, order=c(0, 1, 2), seasonal=c(0, 0, 1),fixed=c(NA,	0,	0), method="ML")
+
+# Model 6: ARIMA(1,1,1)
+refine_models95[['p=1q=1Q=0']] <- arima(train_set, order=c(1, 1, 1), seasonal=c(0, 0, 0),fixed=c(NA,	NA), method="ML")
+
+# Model 7: ARIMA(0,1,2)
+refine_models95[['p=0q=2Q=0']] <- arima(train_set, order=c(0, 1, 2), seasonal=c(0, 0, 0),fixed=c(NA,	0), method="ML")
+
+# Model 8: ARIMA(0,1,15)(0,0,1)[52]
+refine_models95[['p=0q=15Q=1']] <- arima(train_set, order=c(0, 1, 15), seasonal=c(0, 0, 1),fixed=c(NA,	0,	0,	0,	NA,	NA,	NA,	0,	NA,	NA,	0,	0,	0,	0,	0,	NA), method="ML")
+
+# Model 9: ARIMA(0,1,1)(0,0,1)[52]
+refine_models95[['p=0q=1Q=1']] <- arima(train_set, order=c(0, 1, 1), seasonal=c(0, 0, 1),fixed=c(NA,	0), method="ML")
+
+# Model 10: ARIMA(1,1,15)
+refine_models95[['p=1q=15Q=0']] <- arima(train_set, order=c(1, 1, 15), seasonal=c(0, 0, 0),fixed=c(NA,	NA,	NA,	0,	0,	0,	0,	0,	0,	NA,	0,	NA,	0,	0,	0,	0), method="ML")
+```
+
+```{r}
+# Loop through each model in the list and print its summary
+for (model_name in top_ten_names) {
+  cat("\nSummary for model:", model_name, "\n")
+  print(summary(refine_models95[[model_name]]))
+}
+```
+
+```{r}
+# Loop through each model in the list and print its summary
+for (model_name in top_ten_names) {
+  cat("\nAICcs for model:", model_name, "\n")
+  print(AICc(refine_models[[model_name]]))
+}
+```
+
+The candidate models for analysis are:
+
+AICcs for model: p=0q=15Q=1 
+[1] 2902.074
+
+AICcs for model: p=2q=5Q=1 
+[1] 2902.434
+
+```{r}
+candidates = c("p=0q=15Q=1","p=2q=5Q=1")
+candidate_model <- list()
+for (model_name in candidates) {
+  cat("\nSummary for model:", model_name, "\n")
+  candidate_model[[model_name]] <- refine_models[[model_name]]
+  print(summary(refine_models[[model_name]]))
+}
+```
+
+The candidate models for analysis are:
+
+p=0q=15Q=1 is actually p=0q=10Q=1 which is ARIMA(0,1,10)(0,0,1)[52] given by
+
+$$
+\nabla X_t=(1+0.2209B^{52})(1-0.5296B-0.2266B^2-0.2164B^5+0.2543B^6-0.2472B^7+0.2590B^9-0.2897B^{10})Z_t
+$$
+
+with $\hat\sigma^2_Z=6561204$
+
+p=2q=5Q=1 which is ARIMA(2,1,5)(0,0,1)[52] given by
+
+$$
+(1+1.2015B+0.7193B^2)\nabla X_t=(1+0.1772B^{52})(1+0.7529B-0.5274B^3-0.1512B^5)Z_t
+$$
+with $\hat\sigma^2_Z=6993286$
+
+## Diagnostic Checking:
+
+```{r}
+candidate1 <- candidate_model[[1]]
+candidate2 <- candidate_model[[2]]
+```
+
+```{r}
+candidate1.res <- residuals(candidate1)
+plot.ts(candidate1.res, main = 'ARIMA(0,1,10)(0,0,1)[52]')
+abline(h=mean(candidate1.res), col="blue")
+hist(candidate1.res, breaks = 40, xlab="", prob=TRUE,
+main = 'ARIMA(0,1,10)(0,0,1)[52] Residuals Histogram')
+m.arima111 <- mean(candidate1.res)
+std.arima111 <- sqrt(var(candidate1.res))
+curve(dnorm(x,m.arima111,std.arima111), add=TRUE )
+qqnorm(candidate1.res,main= "Normal Q-Q Plot for ARIMA(0,1,10)(0,0,1)[52]")
+qqline(candidate1.res,col="blue")
+acf(candidate1.res, lag.max=52*3, main = 'ACF of ARIMA(0,1,10)(0,0,1)[52] Residuals')
+pacf(candidate1.res, lag.max=52*3, main = 'PACF of ARIMA(0,1,10)(0,0,1)[52] Residuals')
+```
+
+```{r}
+plot.roots(NULL,polyroot(c(1,-0.5296,-0.2266,0,0,-0.2164,0.2543,-0.2472,0,0.2590,-0.2897)), main="ARIMA(0,1,10)(0,0,1)[52] Roots ")
+plot.roots(polyroot(c(1,1.2015,0.7193)),polyroot(c(1,0.7529,0,-0.5274,0,-0.1512)), main="ARIMA(2,1,5)(0,0,1)[52]")
+```
+
+
+```{r}
+shapiro.test(candidate1.res)
+Box.test(candidate1.res, type=c("Box-Pierce"), lag = 52, fitdf = 11)
+Box.test(candidate1.res, type=c("Ljung-Box"), lag = 52, fitdf = 11)
+Box.test((candidate1.res)^2, type=c("Ljung-Box"), lag = 104, fitdf = 11)
+# McLeod.Li.test(candidate1.res)
+ar(candidate1.res, aic = TRUE, order.max = NULL, method = c("yule-walker"))
+```
+
+
+```{r}
+candidate2.res <- residuals(candidate2)
+plot.ts(candidate2.res, main = 'ARIMA(2,1,5)(0,0,1)[52]')
+abline(h=mean(candidate2.res), col="blue")
+hist(candidate2.res, breaks = 40, xlab="", prob=TRUE,
+main = 'ARIMA(2,1,5)(0,0,1)[52] Residuals Histogram')
+m.arima111 <- mean(candidate2.res)
+std.arima111 <- sqrt(var(candidate2.res))
+curve(dnorm(x,m.arima111,std.arima111), add=TRUE )
+qqnorm(candidate2.res,main= "Normal Q-Q Plot for ARIMA(2,1,5)(0,0,1)[52]")
+qqline(candidate2.res,col="blue")
+acf(candidate2.res, lag.max=52*3, main = 'ACF of ARIMA(2,1,5)(0,0,1)[52] Residuals')
+pacf(candidate2.res, lag.max=52*3, main = 'PACF of ARIMA(2,1,5)(0,0,1)[52] Residuals')
+```
+
+```{r}
+shapiro.test(candidate2.res)
+Box.test(candidate2.res, type=c("Box-Pierce"), lag = 52, fitdf = 8)
+Box.test(candidate2.res, type=c("Ljung-Box"), lag = 52, fitdf = 8)
+Box.test((candidate1.res)^2, type=c("Ljung-Box"), lag = 104, fitdf = 0)
+# McLeod.Li.test(candidate2.res)
+ar(candidate2.res, aic = TRUE, order.max = NULL, method = c("yule-walker"))
+```
+
+## Forecasting
+
+```{r}
+forecast(candidate1)
+pred<- predict(candidate1, n.ahead = 10) # To produce graph with 10 forecast on data:
+U= pred$pred + 2*pred$se # Upper bound of prediction interval
+L= pred$pred - 2*pred$se # Lower bound of prediction interval
+
+
+n_forecast <- 10
+# Forecast end time point
+forecast_start <- as.numeric(tail(time(train_set), 1)) + 1/52
+forecast_end <- forecast_start + (n_forecast-1)/52
+ts.plot(power_ts, xlim=c(time(power_ts)[1],forecast_end),ylim = c(min(power_ts),max(U)),
+main = 'ARIMA(2,1,5)(0,0,1)[52] Model Forecasting')
+
+forecast_time_points <- seq(from = forecast_start, to = forecast_end, by = 1/52)
+
+# Plotting
+lines(forecast_time_points, y = U, col = "blue", lty = 2)
+lines(forecast_time_points, y = L, col = "blue", lty = 2)
+# points(forecast_time_points, pred$pred, col = "red")
+lines(forecast_time_points, pred$pred, col = "red")
+
+legend("topleft",
+legend = c('Model Data', 'Forecasted Values', '95% CI'),
+fill = c('black','red','blue'),
+border = "black")
+```
+
+```{r}
+forecast(candidate2)
+pred<- predict(candidate2, n.ahead = 10) # To produce graph with 10 forecast on data:
+U= pred$pred + 2*pred$se # Upper bound of prediction interval
+L= pred$pred - 2*pred$se # Lower bound of prediction interval
+
+
+n_forecast <- 10
+# Forecast end time point
+forecast_start <- as.numeric(tail(time(train_set), 1)) + 1/52
+forecast_end <- forecast_start + (n_forecast-1)/52
+ts.plot(power_ts, xlim=c(time(power_ts)[1],forecast_end),ylim = c(min(power_ts),max(U)),
+main = 'ARIMA(2,1,5)(0,0,1)[52] Model Forecasting')
+
+forecast_time_points <- seq(from = forecast_start, to = forecast_end, by = 1/52)
+
+# Plotting
+lines(forecast_time_points, y = U, col = "blue", lty = 2)
+lines(forecast_time_points, y = L, col = "blue", lty = 2)
+# points(forecast_time_points, pred$pred, col = "red")
+lines(forecast_time_points, pred$pred, col = "red")
+
+legend("topleft",
+legend = c('Model Data', 'Forecasted Values', '95% CI'),
+fill = c('black','red','blue'),
+border = "black")
+```
+
+
+```{r}
+forecast(candidate1)
+pred<- predict(candidate1, n.ahead = 10) # To produce graph with 10 forecast on data:
+U= pred$pred + 2*pred$se # Upper bound of prediction interval
+L= pred$pred - 2*pred$se # Lower bound of prediction interval
+
+
+n_forecast <- 10
+# Forecast end time point
+forecast_start <- as.numeric(tail(time(train_set), 1)) + 1/52
+forecast_end <- forecast_start + (n_forecast-1)/52
+ts.plot(power_ts, xlim=c(time(power_ts)[120],forecast_end),ylim = c(min(power_ts),max(U)),
+main = 'ARIMA(2,1,5)(0,0,1)[52] Model Forecasting')
+
+forecast_time_points <- seq(from = forecast_start, to = forecast_end, by = 1/52)
+
+# Plotting
+lines(forecast_time_points, y = U, col = "blue", lty = 2)
+lines(forecast_time_points, y = L, col = "blue", lty = 2)
+# points(forecast_time_points, pred$pred, col = "red")
+lines(forecast_time_points, pred$pred, col = "red")
+
+legend("topleft",
+legend = c('Model Data', 'Forecasted Values', '95% CI'),
+fill = c('black','red','blue'),
+border = "black")
+```
+
+```{r}
+forecast(candidate2)
+pred<- predict(candidate2, n.ahead = 10) # To produce graph with 10 forecast on data:
+U= pred$pred + 2*pred$se # Upper bound of prediction interval
+L= pred$pred - 2*pred$se # Lower bound of prediction interval
+
+
+n_forecast <- 10
+# Forecast end time point
+forecast_start <- as.numeric(tail(time(train_set), 1)) + 1/52
+forecast_end <- forecast_start + (n_forecast-1)/52
+ts.plot(power_ts, xlim=c(time(power_ts)[120],forecast_end),ylim = c(min(power_ts),max(U)),
+main = 'ARIMA(2,1,5)(0,0,1)[52] Model Forecasting')
+
+forecast_time_points <- seq(from = forecast_start, to = forecast_end, by = 1/52)
+
+# Plotting
+lines(forecast_time_points, y = U, col = "blue", lty = 2)
+lines(forecast_time_points, y = L, col = "blue", lty = 2)
+# points(forecast_time_points, pred$pred, col = "red")
+lines(forecast_time_points, pred$pred, col = "red")
+
+legend("topleft",
+legend = c('Model Data', 'Forecasted Values', '95% CI'),
+fill = c('black','red','blue'),
+border = "black")
+```
+

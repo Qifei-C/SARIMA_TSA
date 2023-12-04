@@ -1,0 +1,43 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+```{r}
+root_dir <- rprojroot::find_rstudio_root_file()
+setwd(root_dir)
+source("./scripts/rawdata.R")
+```
+
+```{r}
+data1 <- data[which(data$`Province/State` == "Hubei"),]
+# install.packages(c("lubridate","reshape2"))
+library(lubridate)
+library(reshape2)
+
+
+# Identify date columns
+date_cols <- grep("^\\d+/\\d+/\\d+$", names(data1))
+
+
+# Melt the data
+long_data <- melt(data1, id.vars = c("Province/State", "Country/Region", "Lat", "Long"), 
+                  variable.name = "Date", value.name = "Value", 
+                  measure.vars = date_cols)
+
+# Convert the Date column to a Date type
+long_data$Date <- mdy(long_data$Date)
+
+# Aggregate data by date (example)
+aggregated_data <- aggregate(Value ~ Date, data = long_data, sum)
+
+# Create a time series object
+ts_data <- ts(aggregated_data$Value, start = c(2020, as.numeric(format(min(long_data$Date), "%j"))), 
+              end = c(2021, as.numeric(format(max(long_data$Date), "%j"))), 
+              frequency = 365)
+```
+
+```{r}
+plot(ts_data, main="Covid19 db from 1/22/20 4/20/21")
+```
+
