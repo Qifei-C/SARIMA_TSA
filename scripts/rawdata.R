@@ -24,8 +24,8 @@ result_dir <- file.path(root_dir, "result")
 kgl_auth(creds_file = './scripts/kaggle.json')
 
 # download and import
-response <- kgl_datasets_download_all(owner_dataset = "sumanthvrao/daily-climate-time-series-data")
+response <- kgl_datasets_download_all(owner_dataset = "shenba/time-series-datasets")
 download.file(response[["url"]], "./data/temp.zip", mode="wb")
 unzip("data/temp.zip", exdir = "./data/", overwrite = TRUE)
-data_file <- "./data/confirmed_global.csv"
+data_file <- "./data/Electric_Production.csv"
 data <- read_csv(data_file)

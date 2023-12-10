@@ -1,0 +1,112 @@
+---
+title: "Untitled"
+output: html_document
+date: "2023-12-09"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+# Load necessary libraries
+library(ggplot2)
+library(readr)
+
+# Read the data
+unemployment_data <- read_csv("USUnemployment.csv")
+
+# Reshaping the data from wide to long format
+unemployment_long <- gather(unemployment_data, month, UnemploymentRate, Jan:Dec, factor_key=TRUE)
+
+# Creating a new Date column
+months <- c('Jan' = '01', 'Feb' = '02', 'Mar' = '03', 'Apr' = '04', 'May' = '05', 'Jun' = '06',
+            'Jul' = '07', 'Aug' = '08', 'Sep' = '09', 'Oct' = '10', 'Nov' = '11', 'Dec' = '12')
+unemployment_long <- unemployment_long %>% 
+  mutate(Date = as.Date(paste(Year, months[month], "01", sep = "-")))
+
+# Sort data by Date
+unemployment_long <- unemployment_long %>% arrange(Date)
+
+# Creating a time series object
+# Assuming the data starts in January 1948 and is monthly
+unemployment_ts <- ts(unemployment_long$UnemploymentRate, start = c(1948, 1), frequency = 12)
+```
+
+```{r}
+plot(unemployment_ts)
+```
+
+```{r}
+fit <- lm(unemployment_ts ~ time(unemployment_ts))
+ts.plot(unemployment_ts,gpars=list(xlab="Year",ylab="Consumption"))
+abline(h=mean(unemployment_ts), col="red")
+abline(fit, col="blue", lwd=2)
+hist(unemployment_ts, breaks = 40, xlab="", prob=TRUE,
+main = 'Time Series Histogram before Transformation')
+```
+
+```{r}
+var(unemployment_ts)
+library(MASS)
+t = 1:length(unemployment_ts)
+fit = lm(unemployment_ts ~ t)
+bcTransform = boxcox(unemployment_ts ~ t,plotit = TRUE)
+lambda = bcTransform$x[which(bcTransform$y == max(bcTransform$y))]
+unemployment_ts.bc = (1/lambda)*(unemployment_ts^lambda-1)
+hist(unemployment_ts.bc, breaks = 40, xlab="", prob=TRUE,
+main = 'Time Series Histogram after Box-Cox Trans')
+var(unemployment_ts.bc)
+plot(unemployment_ts.bc)
+```
+
+```{r}
+plot(diff(unemployment_ts.bc))
+plot(diff(unemployment_ts.bc,lag=1))
+```
+
+```{r}
+length_ts <- length(unemployment_ts)
+split <- ceiling(3/4 * length_ts)
+
+# Determine the cutting time
+ts_start <- start(unemployment_ts)
+ts_end <- end(unemployment_ts)
+split_time <- ts_start + c(0, split - 1)
+
+# Create the training and testing set
+train_set <- window(unemployment_ts, start=ts_start, end=split_time)
+test_set <- window(unemployment_ts, start=split_time + 1, end=ts_end)
+
+# Plotting the training and test sets
+plot(train_set, main="Train Time Series", xlab="Time", ylab="Transformed Consumption")
+plot(test_set, main="Test Time Series", xlab="Time", ylab="Transformed Consumption")
+```
+
+```{r}
+plot(decompose(train_set)$seasonal)
+```
+
+```{r}
+train_set_diff <- diff(train_set, 1)
+train_set_diff2 <- diff(train_set_diff, frequency(train_set))
+acf(train_set, lag.max = 12*5, main = 'ACF of trended Data') # ACF
+pacf(train_set, lag.max = 12*5, main = 'PACF of trended Data') # PACF
+acf(train_set_diff, lag.max = 12*5, main = 'ACF of trended Data') # ACF
+pacf(train_set_diff, lag.max = 12*5, main = 'PACF of trended Data') # PACF
+acf(train_set_diff2, lag.max = 12*5, main = 'ACF of De-trended Data') # ACF
+pacf(train_set_diff2, lag.max = 12*5, main = 'PACF of De-trended Data') # PACF
+var(train_set)
+var(train_set_diff)
+var(train_set_diff2)
+```
+
+```{r}
+# Compute ACF and PACF
+acf_values <- acf(train_set_diff, lag.max = 12*3, plot = FALSE)
+pacf_values <- pacf(train_set_diff, lag.max = 12*3, plot = FALSE)
+acf(train_set_diff, lag.max = 12*5, main = 'ACF of trended Data') # ACF
+pacf(train_set_diff, lag.max = 12*5, main = 'PACF of trended Data') # PACF
+```
+
+p: 3,4,5 q: 2,(10) d: 1 P: 0,1,2,3 () Q: 1,2 D: 1 s:12

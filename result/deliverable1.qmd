@@ -1,8 +1,42 @@
 ---
 title: "Qifei_FinalProject_274"
 author: "Qifei Cui"
-format: html
 editor: visual
+date: last-modified
+published-title: "Updated"
+format: pdf
+code-copy: true
+execute:
+  message: false
+  warning: false
+  echo: false
+  cache: true
 ---
 
-## Final Project
+## Abstract
+
+## Introduction
+
+This study focuses on a comprehensive analysis of a time series dataset, which tracks the monthly electric production in kilowatt-hours (kWh) for the state of New South Wales (NSW), Australia, spanning from January 1985 to January 2018. This dataset covers an extensive period, offering insights into long-term trends and patterns in electric production. By selecting NSW which is one of the cores of Australia's economy and energy landscape, making this dataset particularly relevant for regional energy analysis.
+
+The primary objective of this study is to apply advanced time series analysis techniques to forecast future electricity production trends. This forecasting is crucial for several stakeholders, including policymakers, energy producers, and environmental analysts, as it aids in planning, policy formulation, and understanding the implications of past and future trends in energy production.
+
+To achieve this, I employ Seasonal Auto Regressive Integrated Moving Average(SARIMA) models, which is chosen for its effectiveness in modeling and predicting time series data, particularly in capturing long-term trends.
+
+## Data Preprocessing
+
+## Plot and Analyze
+
+## Transformation and Differencing
+
+## Model Identification
+
+## Coefficients Estimation and Diagnostic Checking
+
+## Forcasting
+
+## Conclusion
+
+## Reference
+
+## Appendix

@@ -1,0 +1,468 @@
+---
+title: "R Notebook"
+output:
+  html_document:
+    df_print: paged
+editor_options: 
+  markdown: 
+    wrap: 72
+---
+
+## Environment Settings
+
+```{r}
+rm(list = ls())
+root_dir <- rprojroot::find_rstudio_root_file()
+setwd(root_dir)
+source("./scripts/rawdata2.R")
+source("./scripts/plot.roots.R")
+```
+
+```{r}
+# install.packages(c("xts","zoo","forecast","qpcR","astsa","TSA"))
+library(xts)
+library(zoo)
+```
+
+## Data Processing
+
+Check `NULL` Values
+
+```{r}
+sum(is.na(data)) # Check NA values
+data$DATE <- as.Date(data$DATE, format="%Y-%m-%d")
+data_1985 <- data[data$DATE > as.Date("1985-01-01"), ]
+power_ts <- ts(data_1985$IPG2211A2N, start=c(1985, 1), frequency=12)
+```
+
+Trend Checking
+
+```{r}
+fit <- lm(power_ts ~ time(power_ts))
+ts.plot(power_ts,gpars=list(xlab="Year",ylab="Consumption"))
+abline(h=mean(power_ts), col="red")
+abline(fit, col="blue", lwd=2)
+hist(power_ts, breaks = 40, xlab="", prob=TRUE,
+main = 'Time Series Histogram before Transformation')
+```
+
+Transformation:
+
+```{r}
+var(power_ts)
+library(MASS)
+t = 1:length(power_ts)
+fit = lm(power_ts ~ t)
+bcTransform = boxcox(power_ts ~ t,plotit = TRUE)
+lambda = bcTransform$x[which(bcTransform$y == max(bcTransform$y))]
+```
+```{r}
+power_ts.bc = (1/lambda)*(power_ts^lambda-1)
+hist(power_ts.bc, breaks = 40, xlab="", prob=TRUE,
+     main = 'Time Series Histogram after Box-Cox Trans')
+var(power_ts.bc)
+```
+
+```{r}
+var(power_ts)
+power_ts.log <- log(power_ts)
+hist(power_ts.log, breaks = 40, xlab="", prob=TRUE,
+main = 'Time Series Histogram after Log Trans')
+var(power_ts.log)
+```
+
+```{r}
+var(power_ts)
+power_ts.sqrt <- sqrt(power_ts)
+hist(power_ts.sqrt, breaks = 40, xlab="", prob=TRUE,
+main = 'Time Series Histogram after Log Trans')
+var(power_ts.sqrt)
+```
+
+
+```{r}
+plot(power_ts)
+plot(power_ts.log)
+plot(power_ts.bc)
+plot(diff(power_ts.sqrt))
+plot(diff(power_ts))
+plot(diff(power_ts.log))
+plot(diff(power_ts.bc))
+plot(diff(power_ts.sqrt))
+```
+
+```{r}
+# Determine the cutting time
+ts_start <- start(power_ts)
+ts_end <- end(power_ts)
+split_point <- c(2020, 1)
+
+# Create the training and testing set
+train_set <- window(power_ts.log, start=ts_start, end=split_point)
+test_set <- window(power_ts.log, start=split_point + 1, end=ts_end)
+
+# Plotting the training and test sets
+plot(train_set, main="Train Time Series", xlab="Time", ylab="Transformed Consumption")
+plot(test_set, main="Test Time Series", xlab="Time", ylab="Transformed Consumption")
+```
+
+```{r}
+plot(decompose(train_set)$seasonal)
+```
+
+```{r}
+train_set_diff <- diff(train_set, 1)
+train_set_diff2 <- diff(train_set_diff, 12)
+acf(train_set, lag.max = 12*3, main = 'ACF of trended Data') # ACF
+pacf(train_set, lag.max = 12*3, main = 'PACF of trended Data') # PACF
+acf(train_set_diff, lag.max = 12*3, main = 'ACF of trended Data') # ACF
+pacf(train_set_diff, lag.max = 12*3, main = 'PACF of trended Data') # PACF
+acf(train_set_diff2, lag.max = 12*3, main = 'ACF of De-trended Data') # ACF
+pacf(train_set_diff2, lag.max = 12*3, main = 'PACF of De-trended Data') # PACF
+var(train_set)
+var(train_set_diff)
+var(train_set_diff2)
+```
+
+
+```{r}
+# Compute ACF and PACF
+acf_values <- acf(train_set_diff2, lag.max = 12*3, plot = FALSE)
+pacf_values <- pacf(train_set_diff2, lag.max = 12*3, plot = FALSE)
+
+# Determine the significance level (95% confidence)
+n <- length(train_set_diff2)
+conf_level <- qnorm((1 + 0.95)/2) / sqrt(n)
+
+# Find significant lags for ACF
+significant_acf_lags <- which(abs(acf_values$acf) > conf_level)
+
+# Find significant lags for PACF
+significant_pacf_lags <- which(abs(pacf_values$acf) > conf_level)
+
+# Output the lags
+cat("Significant ACF lags at 95% confidence: ", significant_acf_lags, "\n")
+cat("Significant PACF lags at 95% confidence: ", significant_pacf_lags, "\n")
+```
+
+When determining the period for a seasonal model from ACF and PACF
+plots, I consider the domain knowledge about the data as well as the
+repeating patterns in the lags. The significant lags provided suggest
+there is a significant autocorrelation at lags 1 2 3 11 13 24 25 27.
+
+The lag values of 11 13 24 25 suggest a possible yearly seasonality (12
+months one year). Since the significant lag at 11,13 is close to 12 and
+24,25 is close to 24 and appears to be a prominent seasonal peak, it
+could be the actual seasonal period.
+
+SMA(1) might leads to PACF significant in period lags and shows a
+pattern of exp decay MA(1/2) patterns
+
+p: 1,2,4,5 q: 0,1,2,3 d: 1 P: 0,1,2 Q: 1,2 D: 1 s:12
+
+## Training
+
+```{r}
+library(forecast)
+library(qpcR)
+
+# Initialize an empty list to store AICc values and model specifications
+aiccs <- list()
+model_saver <- list()
+
+# Given values
+p_vals <- c(1,2,4,5)
+q_vals <- c(0,1,2,3)
+P_vals <- c(0,1)
+Q_vals <- c(1,2)
+d_val <- 1
+D_val <- 1
+s_val <- 12
+
+# Loop over the candidate variables for p, q, P, Q
+for(p in p_vals) {
+  for(P in P_vals) {
+    for(q in q_vals) {
+      for(Q in Q_vals) {
+        # Fit the SARIMA model with the given parameters
+        model <- Arima(train_set, order=c(p, d_val, q), seasonal=c(P, D_val, Q), method="ML")
+        model_name <- paste("SARIMA(", p, ",", d_val, ",", q, ")(", P, ",", D_val, ",", Q, ")[", s_val, "]", sep="")
+        model_saver[[model_name]] <- model
+        # Calculate the AICc and store in the list with the corresponding model specifications
+        aiccs[[model_name]] <- AICc(model)
+      }
+    }
+  }
+}
+```
+
+```{r}
+# Given values
+p_vals <- c(5)
+q_vals <- c(0,1,2,3)
+P_vals <- c(0,1)
+Q_vals <- c(1,2)
+d_val <- 1
+D_val <- 1
+s_val <- 12
+
+# Loop over the candidate variables for p, q, P, Q
+for(p in p_vals) {
+  for(P in P_vals) {
+    for(q in q_vals) {
+      for(Q in Q_vals) {
+        # Fit the SARIMA model with the given parameters
+        model <- Arima(train_set, order=c(p, d_val, q), seasonal=c(P, D_val, Q), method="ML")
+        model_name <- paste("SARIMA(", p, ",", d_val, ",", q, ")(", P, ",", D_val, ",", Q, ")[", s_val, "]", sep="")
+        model_saver[[model_name]] <- model
+        # Calculate the AICc and store in the list with the corresponding model specifications
+        aiccs[[model_name]] <- AICc(model)
+      }
+    }
+  }
+}
+```
+
+
+```{r}
+# Given values
+p_vals <- c(1,2)
+q_vals <- c(0,1,2,3)
+P_vals <- c(2)
+Q_vals <- c(1,2)
+d_val <- 1
+D_val <- 1
+s_val <- 12
+
+# Loop over the candidate variables for p, q, P, Q
+for(p in p_vals) {
+  for(P in P_vals) {
+    for(q in q_vals) {
+      for(Q in Q_vals) {
+        # Fit the SARIMA model with the given parameters
+        model <- Arima(train_set, order=c(p, d_val, q), seasonal=c(P, D_val, Q), method="ML")
+        model_name <- paste("SARIMA(", p, ",", d_val, ",", q, ")(", P, ",", D_val, ",", Q, ")[", s_val, "]", sep="")
+        model_saver[[model_name]] <- model
+        # Calculate the AICc and store in the list with the corresponding model specifications
+        aiccs[[model_name]] <- AICc(model)
+      }
+    }
+  }
+}
+```
+
+
+```{r}
+# Convert the list to a named vector
+aiccs_vector <- unlist(aiccs)
+
+# Sort the vector in ascending order of AICc values
+sorted_aiccs <- sort(aiccs_vector)
+
+# Get the names of the top five models
+top_ten_names <- names(head(sorted_aiccs, 10))
+
+# Get the AICc values of the top five models
+top_ten_values <- head(sorted_aiccs, 10)
+
+# Print the top five models with their AICc values
+for (i in 1:10) {
+    cat("Model:", top_ten_names[i], "with an AICc of", top_ten_values[i], "\n")
+}
+```
+
+```{r}
+# Loop through each model in the list and print its summary
+for (model_name in top_ten_names) {
+  cat("\nSummary for model:", model_name, "\n")
+  print(summary(model_saver[[model_name]]))
+}
+```
+
+## Refine
+
+```{r}
+refine_models <- list()
+library(astsa)
+```
+
+```{r}
+# Model 1: SARIMA(5,1,5)(0,1,2)[12]
+refine_models[['SARIMA(4,1,3)(0,1,1)[12]']] <- arima(train_set, order=c(4,1,3), seasonal=c(0,1,1), method="ML")
+summary(refine_models[['SARIMA(4,1,3)(0,1,1)[12]']])
+refine_models[['SARIMA(4,1,3)(0,1,1)[12]']] <- arima(train_set, order=c(4,1,3), seasonal=c(0,1,1), fixed=c(NA, NA, NA, 0, NA, NA, NA,NA), method="ML")
+summary(refine_models[['SARIMA(4,1,3)(0,1,1)[12]']])
+```
+
+```{r}
+# Model 2: SARIMA(1,1,1)(1,1,2)[12]
+summary(model_saver[['SARIMA(1,1,1)(1,1,2)[12]']])
+refine_models[['SARIMA(1,1,1)(1,1,2)[12]']] <- arima(train_set, order=c(1,1,1), seasonal=c(1,1,2),  method="ML")
+summary(refine_models[['SARIMA(1,1,1)(1,1,2)[12]']])
+```
+
+```{r}
+# Model 3: SARIMA(5,1,2)(1,1,2)[12]
+summary(model_saver[['SARIMA(5,1,2)(1,1,2)[12]']])
+refine_models[['SARIMA(5,1,2)(1,1,2)[12]']] <- arima(train_set, order=c(5,1,2), seasonal=c(1,1,2), fixed= c(NA, NA, 0, 0, NA, 0, NA, NA, NA, NA), method="ML")
+summary(refine_models[['SARIMA(5,1,2)(1,1,2)[12]']])
+refine_models[['SARIMA(5,1,2)(1,1,2)[12]']] <- arima(train_set, order=c(5,1,2), seasonal=c(1,1,2), fixed= c(NA, NA, 0, 0, NA, 0, NA, NA, 0, NA), method="ML")
+summary(refine_models[['SARIMA(5,1,2)(1,1,2)[12]']])
+refine_models[['SARIMA(5,1,2)(1,1,2)[12]']] <- arima(train_set, order=c(5,1,2), seasonal=c(1,1,2), fixed= c(NA, NA, 0, 0, NA, 0, NA, NA, NA, NA), method="ML")
+summary(refine_models[['SARIMA(5,1,2)(1,1,2)[12]']])
+# model2 finally goes to SARIMA(2,1,2)(2,1,1)[12]
+```
+
+
+```{r}
+candidates = c("SARIMA(5,1,2)(1,1,2)[12]")
+candidate_model <- list()
+for (model_name in candidates) {
+  cat("\nSummary for model:", model_name, "\n")
+  candidate_model[[model_name]] <- refine_models[[model_name]]
+  print(summary(refine_models[[model_name]]))
+}
+```
+
+The candidate models for analysis are:
+
+## Diagnostic Checking:
+
+```{r}
+candidate1 <- candidate_model[[1]]
+#candidate2 <- candidate_model[[2]]
+```
+
+```{r}
+candidate1.res <- residuals(candidate1)
+plot.ts(candidate1.res, main = 'SARIMA(5,1,2)(1,1,2)[12]')
+abline(h=mean(candidate1.res), col="blue")
+hist(candidate1.res, breaks = 40, xlab="", prob=TRUE,
+main = 'SARIMA(5,1,2)(1,1,2)[12] Residuals Histogram')
+m.candidate1 <- mean(candidate1.res)
+std.candidate1 <- sqrt(var(candidate1.res))
+curve(dnorm(x,m.candidate1,std.candidate1), add=TRUE )
+qqnorm(candidate1.res,main= "Normal Q-Q Plot for SARIMA(5,1,2)(1,1,2)[12]")
+qqline(candidate1.res,col="blue")
+acf(candidate1.res, lag.max=12*3, main = 'SARIMA(5,1,2)(1,1,2)[12] Residuals')
+pacf(candidate1.res, lag.max=12*3, main = 'SARIMA(5,1,2)(1,1,2)[12] Residuals')
+```
+
+```{r}
+summary(candidate1)
+plot.roots(polyroot(c(1,-0.3846,-0.4685)),polyroot(c(1,0,-0.2583)), main="SARIMA(2,1,2)(2,1,1)[12] Roots Test")
+plot.roots(polyroot(c(1,0,0.1896)),polyroot(c(1,-0.7620)), main="SARIMA(2,1,2)(2,1,1)[12] Seasonal Part Roots Test")
+```
+
+```{r}
+shapiro.test(candidate1.res)
+Box.test(candidate1.res, type=c("Box-Pierce"), lag = 20, fitdf = 7)
+Box.test(candidate1.res, type=c("Ljung-Box"), lag = 20, fitdf = 7)
+Box.test((candidate1.res)^2, type=c("Ljung-Box"), lag = 20, fitdf = 0)
+ar(candidate1.res, aic = TRUE, order.max = NULL, method = c("yule-walker"))
+```
+
+```{r}
+candidate2.res <- residuals(candidate2)
+plot.ts(candidate2.res, main = 'SARIMA(2,1,2)(2,1,1)[12]')
+abline(h=mean(candidate2.res), col="blue")
+hist(candidate2.res, breaks = 40, xlab="", prob=TRUE,
+main = 'SARIMA(2,1,2)(2,1,1)[12] Residuals Histogram')
+m.candidate2 <- mean(candidate2.res)
+std.candidate2 <- sqrt(var(candidate2.res))
+curve(dnorm(x,m.candidate2,std.candidate2), add=TRUE )
+qqnorm(candidate2.res,main= "Normal Q-Q Plot for SARIMA(2,1,2)(2,1,1)[12]")
+qqline(candidate2.res,col="blue")
+acf(candidate2.res, lag.max=12*3, main = 'SARIMA(2,1,2)(2,1,1)[12] Residuals')
+pacf(candidate2.res, lag.max=12*3, main = 'SARIMA(2,1,2)(2,1,1)[12] Residuals')
+```
+
+```{r}
+summary(candidate2)
+plot.roots(polyroot(c(1,0,-0.8359)),polyroot(c(1,0.3942,-0.5057)), main="SARIMA(2,1,2)(2,1,1)[12] Roots Test")
+plot.roots(polyroot(c(1,-0.7688)),polyroot(c(1,0,0.1942)), main="SARIMA(2,1,2)(2,1,1)[12] Seasonal Part Roots Test")
+```
+
+```{r}
+shapiro.test(candidate2.res)
+Box.test(candidate2.res, type=c("Box-Pierce"), lag = 22, fitdf = 5)
+Box.test(candidate2.res, type=c("Ljung-Box"), lag = 22, fitdf = 5)
+Box.test((candidate2.res)^2, type=c("Ljung-Box"), lag = 22, fitdf = 0)
+ar(candidate2.res, aic = TRUE, order.max = NULL, method = c("yule-walker"))
+```
+
+## Forecasting
+
+```{r}
+forecast(candidate1)
+pred<- predict(candidate1, n.ahead = 24) # To produce graph with 10 forecast on data:
+U= pred$pred + 2*pred$se # Upper bound of prediction interval
+L= pred$pred - 2*pred$se # Lower bound of prediction interval
+
+
+n_forecast <- 24
+# Forecast end time point
+forecast_start <- as.numeric(tail(time(train_set), 1)) + 1/12
+forecast_end <- forecast_start + (n_forecast-1)/12
+ts.plot(power_ts.log, xlim=c(time(power_ts.log)[1],forecast_end),ylim = c(min(power_ts.log),max(U)),
+main = 'ARIMA(1,1,15)(0,0,1)[52] Model Forecasting')
+
+forecast_time_points <- seq(from = forecast_start, to = forecast_end, by = 1/12)
+
+# Plotting
+lines(forecast_time_points, y = U, col = "blue", lty = 2)
+lines(forecast_time_points, y = L, col = "blue", lty = 2)
+# points(forecast_time_points, pred$pred, col = "red")
+lines(forecast_time_points, pred$pred, col = "red")
+
+legend("topleft",
+legend = c('Model Data', 'Forecasted Values', '95% CI'),
+fill = c('black','red','blue'),
+border = "black")
+```
+
+```{r}
+forecast(candidate1)
+pred<- predict(candidate1, n.ahead = 24) # To produce graph with 10 forecast on data
+U= pred$pred + 2*pred$se # Upper bound of prediction interval
+L= pred$pred - 2*pred$se # Lower bound of prediction interval
+
+
+n_forecast <- 24
+# Forecast end time point
+forecast_start <- as.numeric(tail(time(train_set), 1)) + 1/12
+forecast_end <- forecast_start + (n_forecast-1)/12
+ts.plot(power_ts.log, xlim=c(time(power_ts.log)[400],forecast_end),ylim = c(min(power_ts.log),max(U)),
+main = 'ARIMA(1,1,15)(0,0,1)[52] Model Forecasting Zoom-in')
+
+forecast_time_points <- seq(from = forecast_start, to = forecast_end, by = 1/12)
+
+# Plotting
+lines(forecast_time_points, y = U, col = "blue", lty = 2)
+lines(forecast_time_points, y = L, col = "blue", lty = 2)
+# points(forecast_time_points, pred$pred, col = "red")
+lines(forecast_time_points, pred$pred, col = "red")
+
+legend("topleft",
+legend = c('Model Data', 'Forecasted Values', '95% CI'),
+fill = c('black','red','blue'),
+border = "black")
+```
+
+```{r}
+orig_pred <- exp(pred$pred)  # Convert predicted values back to original scale
+orig_U <- exp(U)  # Convert upper bound back to original scale
+orig_L <- exp(L)  # Convert lower bound back to original scale
+ts.plot(power_ts, xlim=c(time(power_ts)[410], forecast_end), ylim = c(min(power_ts), max(orig_U)),
+main = 'ARIMA(1,1,15)(0,0,1)[52] Model Forecasting on Original Data')
+
+lines(forecast_time_points, y = orig_U, col = "blue", lty = 2)
+lines(forecast_time_points, y = orig_L, col = "blue", lty = 2)
+lines(forecast_time_points, orig_pred, col = "red")
+
+legend("topleft",
+       legend = c('Model Data', 'Forecasted Values', '95% CI'),
+       fill = c('black','red','blue'),
+       border = "black")
+```
+

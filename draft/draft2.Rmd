@@ -645,3 +645,23 @@ fill = c('black','red','blue'),
 border = "black")
 ```
 
+```{r}
+# Compute ACF and PACF
+acf_values <- acf(candidate1.res, lag.max = 52*3, plot = FALSE)
+pacf_values <- pacf(candidate1.res, lag.max = 52*3, plot = FALSE)
+
+# Determine the significance level (95% confidence)
+n <- length(train_set_diff)
+conf_level <- qnorm((1 + 0.95)/2) / sqrt(n)
+
+# Find significant lags for ACF
+significant_acf_lags <- which(abs(acf_values$acf) > conf_level)
+
+# Find significant lags for PACF
+significant_pacf_lags <- which(abs(pacf_values$acf) > conf_level)
+
+# Output the lags
+cat("Significant ACF lags at 95% confidence: ", significant_acf_lags, "\n")
+cat("Significant PACF lags at 95% confidence: ", significant_pacf_lags, "\n")
+```
+
