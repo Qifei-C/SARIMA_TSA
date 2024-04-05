@@ -17,4 +17,13 @@ The goal of this project is achieved. In this project, I successfully overcome c
 
 $$(1+0.3814B-0.408B^2+0.139B^5)\nabla_{1}\nabla_{12}X_t=(1-0.8463B^2)(1-0.7756B^{12})Z_t$$
 
-performs well on the test set. The residuals of this model has been tested with various analysis stratagy to be consisted with White Noise and implies that the model has capture the pattern of the time series.
+performs well on the test set. The residuals of this model has been tested with various analysis stratagy to be consisted with White Noise and implies that the model has capture the pattern of the time series. 
+
+# Forcasting
+
+For forcasting, the predicted values was transformed back by an inverse Box-Cox transformation and an exponential transformation. The results are as following plot, where the black line is the real values from testing set, blue dash lines are the upper and lower bound of the 95% confidence interval, and the red points are the predicted values. 
+
+![alt text](https://github.com/Qifei-C/SARIMA_TSA/blob/main/result/pic/rdme1.png?raw=true)
+
+The first plot is the forecasted value using final model with the 95% confidence interval for the forecasted values with the real values in the testing set. The second plot is the zoom-in plots of the first plot so that I could see the details. From the plots, one could notice that most of the test sets are within the confidence intervals and the predicted values align with the observed value in the testing set. 
+
