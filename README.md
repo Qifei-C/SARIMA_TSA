@@ -1,6 +1,6 @@
 Full raw code and detailed explanation are saved in [TSA_US_Energy_Production.pdf](https://github.com/Qifei-C/SARIMA_TSA/blob/main/TSA_US_Energy_Production.pdf). Feel free to take a look and share your comments.
 
-Part of the paper are as follows:
+Part of the paper is as follows:
 
 # Introduction
 
