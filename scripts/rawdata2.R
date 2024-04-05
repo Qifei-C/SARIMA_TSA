@@ -21,7 +21,7 @@ url <- "https://fred.stlouisfed.org/graph/fredgraph.csv?bgcolor=%23e1e9f0&chart_
 file <- "./data/IPG2211A2N.csv"
 
 download.file(url, destfile = file, mode = "wb")
-data_file <- "./data/IPG2211A2N.csv"
-data <- data <- read.csv(file, header = TRUE)
+data_file <- "./data/Electric_Production.csv"
+data <- read.csv(data_file, header = TRUE)
 
 
