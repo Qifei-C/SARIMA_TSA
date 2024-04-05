@@ -10,7 +10,7 @@ The primary objective of this study is to apply time series analysis techniques 
 
 # Forcasting
 
-For forcasting, the predicted values was transformed back by an inverse Box-Cox transformation and an exponential transformation. The results are as following plot, where the black line is the real values from testing set, blue dash lines are the upper and lower bound of the 95% confidence interval, and the red points are the predicted values. 
+For forcasting, the predicted values was transformed back by an inverse square-root transformation. The results are as following plot, where the black line is the real values from testing set, blue dash lines are the upper and lower bound of the 95% confidence interval, and the red points are the predicted values. 
 
 ![alt text](https://github.com/Qifei-C/SARIMA_TSA/blob/main/result/pic/rdme1.png?raw=true)
 
