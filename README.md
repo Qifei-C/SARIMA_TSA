@@ -1,3 +1,7 @@
+The full raw code and explanation saved in file [TSA_US_Energy_Production.pdf](https://github.com/Qifei-C/SARIMA_TSA/blob/main/TSA_US_Energy_Production.pdf). Feel free to take a look and share your comments.
+
+Part of the paper are as follows:
+
 # Introduction
 
 This study focuses on an analysis of a time series dataset from the Federal Reserve Economic Data (FRED), which tracks the monthly electric power generation in the United States (NAICS = 2211). This dataset spans from January 1985 to January 2018 with 397 observations, providing a vast and detailed view of electric production records over multiple decades. By examining this dataset, one could gain valuable insights into long-term patterns and fluctuations in the U.S. electric power sector, a critical component of the nation's industrial infrastructure.
